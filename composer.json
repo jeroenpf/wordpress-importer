@@ -1,0 +1,28 @@
+{
+    "name": "automattic/wordpress-importer",
+    "description": "Importer for WordPress WXZ export files.",
+    "type": "wordpress-plugin",
+    "license": "GPLv2 or later",
+    "authors": [
+        {
+            "name": "Jeroen Pfeil",
+            "email": "jeroen.pfeil@automattic.com"
+        }
+    ],
+    "minimum-stability": "stable",
+    "require-dev": {
+      "wp-phpunit/wp-phpunit": "^5"
+    },
+    "require": {},
+    "autoload": {
+      "classmap": [
+        "includes/"
+      ]
+    },
+    "scripts": {
+      "format": "phpcbf --standard=phpcs.xml.dist --report-summary --report-source",
+      "lint": "phpcs --standard=phpcs.xml.dist --runtime-set ignore_warnings_on_exit 1",
+      "test": "phpunit",
+      "test:watch": "phpunit-watcher watch < /dev/tty"
+    }
+}
