@@ -9,11 +9,16 @@
             "email": "jeroen.pfeil@automattic.com"
         }
     ],
-    "minimum-stability": "stable",
     "require-dev": {
+      "roave/security-advisories": "dev-master"
+      ,
       "wp-phpunit/wp-phpunit": "^5"
     },
-    "require": {},
+    "require": {
+        "opis/json-schema": "^2.1",
+        "wordpress/wxz-tools" : "dev-main",
+        "ext-json": "*"
+    },
     "autoload": {
       "classmap": [
         "includes/"
@@ -24,5 +29,10 @@
       "lint": "phpcs --standard=phpcs.xml.dist --runtime-set ignore_warnings_on_exit 1",
       "test": "phpunit",
       "test:watch": "phpunit-watcher watch < /dev/tty"
+    },
+  "repositories": [{
+      "type": "vcs",
+      "url": "https://github.com/akirk/wxz-tools"
     }
+  ]
 }
