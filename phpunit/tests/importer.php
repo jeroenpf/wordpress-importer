@@ -20,7 +20,7 @@ class Tests_Importer extends WP_UnitTestCase {
 
 	public function test_can_index_zip_file() {
 
-		$import = new Import( DIR_TESTDATA_WORDPRESS_IMPORTER . '/wordpress-export.zip' );
+		$import = new Import( DIR_TESTDATA_WORDPRESS_IMPORTER . '/atavist-organization-10575.zip' );
 
 		$import->run();
 

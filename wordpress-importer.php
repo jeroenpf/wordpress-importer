@@ -23,4 +23,3 @@ add_filter(
 		return 524288000;
 	}
 );
-

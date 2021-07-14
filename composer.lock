@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "088c026cb4529d62820ed5661f3a86d5",
+    "content-hash": "9eea846e30b27ed4e02a83e16d946d5f",
     "packages": [
         {
             "name": "chamilo/pclzip",
@@ -245,13 +245,13 @@
             "version": "dev-main",
             "source": {
                 "type": "git",
-                "url": "https://github.com/akirk/wxz-tools.git",
-                "reference": "66ddbf6aa2203729984f1378a7158335fa9b6733"
+                "url": "https://github.com/wp-importer/wxz-tools.git",
+                "reference": "bb54a46c2fe5c44e2cae1daa10842eabc1338fa3"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/akirk/wxz-tools/zipball/66ddbf6aa2203729984f1378a7158335fa9b6733",
-                "reference": "66ddbf6aa2203729984f1378a7158335fa9b6733",
+                "url": "https://api.github.com/repos/wp-importer/wxz-tools/zipball/bb54a46c2fe5c44e2cae1daa10842eabc1338fa3",
+                "reference": "bb54a46c2fe5c44e2cae1daa10842eabc1338fa3",
                 "shasum": ""
             },
             "require": {
@@ -288,10 +288,10 @@
             ],
             "description": "Tools for the WXZ (zipped WordPress export) format.",
             "support": {
-                "source": "https://github.com/akirk/wxz-tools/tree/main",
-                "issues": "https://github.com/akirk/wxz-tools/issues"
+                "source": "https://github.com/wp-importer/wxz-tools/tree/main",
+                "issues": "https://github.com/wp-importer/wxz-tools/issues"
             },
-            "time": "2021-07-05T03:03:55+00:00"
+            "time": "2021-07-12T13:09:49+00:00"
         }
     ],
     "packages-dev": [
@@ -301,12 +301,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Roave/SecurityAdvisories.git",
-                "reference": "1a08d0c7ab47e57fad0d254951a615f07445e91f"
+                "reference": "88c4d972f82b364386c98eebecf38512708a4de4"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Roave/SecurityAdvisories/zipball/1a08d0c7ab47e57fad0d254951a615f07445e91f",
-                "reference": "1a08d0c7ab47e57fad0d254951a615f07445e91f",
+                "url": "https://api.github.com/repos/Roave/SecurityAdvisories/zipball/88c4d972f82b364386c98eebecf38512708a4de4",
+                "reference": "88c4d972f82b364386c98eebecf38512708a4de4",
                 "shasum": ""
             },
             "conflict": {
@@ -364,6 +364,7 @@
                 "endroid/qr-code-bundle": "<3.4.2",
                 "enshrined/svg-sanitize": "<0.13.1",
                 "erusev/parsedown": "<1.7.2",
+                "ether/logs": "<3.0.4",
                 "ezsystems/demobundle": ">=5.4,<5.4.6.1",
                 "ezsystems/ez-support-tools": ">=2.2,<2.2.3",
                 "ezsystems/ezdemo-ls-extension": ">=5.4,<5.4.2.1",
@@ -668,7 +669,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2021-07-02T20:02:51+00:00"
+            "time": "2021-07-12T17:14:45+00:00"
         },
         {
             "name": "wp-phpunit/wp-phpunit",
@@ -727,7 +728,10 @@
     },
     "prefer-stable": false,
     "prefer-lowest": false,
-    "platform": [],
+    "platform": {
+        "ext-json": "*",
+        "ext-zip": "*"
+    },
     "platform-dev": [],
     "plugin-api-version": "2.0.0"
 }

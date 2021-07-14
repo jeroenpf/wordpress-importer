@@ -16,9 +16,9 @@ class Import {
 	 * An ordered list of type of objects
 	 */
 	const IMPORT_ORDER = array(
-		'posts',
-		'users',
 		'terms',
+		'users',
+		'posts',
 	);
 
 	const SCHEMA_MAP = array(
@@ -54,6 +54,8 @@ class Import {
 	 * @var int
 	 */
 	protected $processed_counter = 0;
+
+	protected $benchmarks = array();
 
 	/**
 	 * Import constructor.
@@ -102,6 +104,8 @@ class Import {
 			}
 		}
 
+		echo 'PEAK USAGE ' . memory_get_peak_usage() . "\n";
+
 	}
 
 	protected function pre_import() {
@@ -124,37 +128,57 @@ class Import {
 				update_option( self::OPTION_PREFIX . 'stage', 'finalize' );
 				break;
 			}
-
 			$zip_index = $this->wxz_json_index[ $object['type'] ][ $object['index'] ];
 			$file_path = $this->wxz->getNameIndex( $zip_index );
-			$data      = json_decode( $this->wxz->getFromIndex( $zip_index ), true );
-			$type      = self::IMPORT_ORDER[ $object['type'] ];
+			$data      = json_decode( $this->wxz->getFromIndex( $zip_index ) );
 
-			if ( false === $data ) {
-				// Cannot parse the json. Log an error.
-				$this->log( 'invalid-json', sprintf( 'Invalid JSON in %s', $file_path ) );
-				continue;
-			}
-
-			if ( ! $this->data_is_valid( $data, $type ) ) {
-				$this->log(
-					'schema-violation',
-					sprintf( 'The data in %s can not be validated against the schema.', $file_path )
-				);
+			if ( ! $this->is_valid_object( $data, $object['type'], $file_path ) ) {
 				continue;
 			}
 
 			// todo import
-			$this->import_object( $type, $data );
+			$this->import_object( $object['type'], $data );
 
+			$this->set_import_object_complete( $object['index'] );
 			// Update the count of imported items
 			$this->processed_counter++;
 		}
 
 	}
 
-	protected function import_object( $type, $data ) {
+	/**
+	 * @param $data
+	 * @param $type
+	 * @param $file_path
+	 *
+	 * @return bool
+	 */
+	protected function is_valid_object( $data, $type, $file_path ) {
+		if ( null === $data ) {
+			// Cannot parse the json. Log an error.
 
+			$this->log( 'invalid-json', sprintf( 'Invalid JSON in %s', $file_path ) );
+			return false;
+		}
+
+		$type = self::IMPORT_ORDER[ $type ];
+
+		if ( ! $this->data_is_valid( $data, $type ) ) {
+			$this->log(
+				'schema-violation',
+				sprintf( 'The data in %s can not be validated against the schema.', $file_path )
+			);
+
+			return false;
+		}
+
+		return true;
+	}
+
+	protected function import_object( $type, $data ) {
+		$type = self::IMPORT_ORDER[ $type ];
+		usleep(10000);
+		//$this->log( 'importing', printf( 'Importing %s %d', $type, $data->id ) );
 	}
 
 	/**
@@ -177,19 +201,20 @@ class Import {
 		}
 
 		// todo perhaps log schema errors?
-
 		return $result->isValid();
 	}
 
 	/**
-	 * Get the type and index of the next JSON object.
+	 * Get the type and index of the next JSON object to process.
 	 *
 	 * @return array|WP_Error|null
 	 */
 	protected function get_next_object() {
 
 		$option_name = self::OPTION_PREFIX . 'import_state';
-		$locked      = $this->obtain_state_lock();
+
+		// We require a lock because only one process should be manipulating the state at a time.
+		$locked = $this->obtain_state_lock();
 
 		if ( $locked instanceof WP_Error ) {
 			return $locked;
@@ -198,17 +223,36 @@ class Import {
 		$state = get_option(
 			$option_name,
 			array(
-				'type'  => 0,
-				'index' => -1,
+				'type'      => 0,
+				'index'     => -1,
+				'importing' => array(),
 			)
 		);
 
-		$state['index']++;
+		// Remove importing objects that have timed-out.
+		$state = $this->filter_timeout_objects( $state );
 
-		if ( ! isset( $this->wxz_json_index[ $state['type'] ][ $state['index'] ] ) ) {
+		$has_next_object_for_type    = isset( $this->wxz_json_index[ $state['type'] ][ $state['index'] + 1 ] );
+		$type_has_unfinished_imports = ! empty( $state['importing'] );
+
+		// If there are no more objects to process for the current type but there are still imports running,
+		// we need to wait until all objects have completed before moving on to the next type.
+		if ( ! $has_next_object_for_type && $type_has_unfinished_imports ) {
+			$this->release_state_lock();
+			sleep( 2 );
+			return $this->get_next_object();
+		}
+
+		// If there are no more objects for the current type, proceed to the next type.
+		if ( ! $has_next_object_for_type ) {
 			$state['type']  = $this->get_next_type( $state['type'] );
 			$state['index'] = 0;
+		} else {
+			$state['index']++;
 		}
+
+		// Add the object to the list of importing objects.
+		$state['importing'][] = array( $state['index'], time() );
 
 		// If the type is false, there are no more objects to process.
 		if ( false === $state['type'] ) {
@@ -221,11 +265,41 @@ class Import {
 		$this->release_state_lock();
 
 		return $state;
+	}
+
+	/**
+	 * Filter out objects that are importing but have passed the timeout threshold.
+	 *
+	 * @param $state
+	 *
+	 * @return array
+	 */
+	protected function filter_timeout_objects( $state ) {
+
+		$max_duration = 30;
+
+		$state['importing'] = array_filter(
+			$state['importing'],
+			function( $object ) use ( $max_duration ) {
+
+				$timed_out = time() - $object[1] > $max_duration;
+
+				if ( $timed_out ) {
+					$this->log( 'object_import_timeout', __( 'Importing object has timed out', 'wordpress-importer' ) );
+				}
+
+				return $timed_out;
+			}
+		);
+
+		return $state;
 
 	}
 
 	/**
 	 * Get the next type of json object to import.
+	 *
+	 * A type refers to the type of JSON object (e.g. term, post, user, etc.).
 	 *
 	 * @param int $current_type The current type.
 	 *
@@ -245,7 +319,31 @@ class Import {
 			: $next_type;
 	}
 
+	protected function set_import_object_complete( $index ) {
+		$option_name = self::OPTION_PREFIX . 'import_state';
+
+		// We require a lock because only one process should be manipulating the state at a time.
+		$locked = $this->obtain_state_lock();
+
+		if ( $locked instanceof WP_Error ) {
+			return $locked;
+		}
+
+		$state = get_option( $option_name );
+
+		$state['importing'] = array_filter(
+			$state['importing'],
+			static function( $object ) use ( $index ) {
+				return $object[0] !== $index;
+			}
+		);
+
+		$this->release_state_lock();
+	}
+
 	/**
+	 * Obtain a lock for manipulating the state.
+	 *
 	 * @return bool|WP_Error
 	 */
 	protected function obtain_state_lock() {
@@ -258,7 +356,9 @@ class Import {
 
 			$tries++;
 
+			$this->benchmark_start('insert_lock');
 			$lock = $this->insert_state_lock( $lock_name );
+			$this->benchmark_end_print('insert_lock');
 
 			// Check for an expired lock
 			if ( ! $lock && get_option( $lock_name ) > time() - 5 ) {
@@ -277,6 +377,13 @@ class Import {
 
 	}
 
+	/**
+	 * Try to insert the state lock option.
+	 *
+	 * @param $lock_name
+	 *
+	 * @return bool|int
+	 */
 	protected function insert_state_lock( $lock_name ) {
 		global $wpdb;
 
@@ -292,6 +399,9 @@ class Import {
 	}
 
 
+	/**
+	 * Release the lock.
+	 */
 	protected function release_state_lock() {
 		$lock_name = self::OPTION_PREFIX . 'state_lock';
 
@@ -314,7 +424,7 @@ class Import {
 	 */
 	protected function exceeding_time_limit() {
 
-		$time_limit = (int) ini_get( 'max_execution_time' );
+		$time_limit = 10; //(int) ini_get( 'max_execution_time' );
 
 		$total_time = microtime( true ) - $this->start_time;
 
@@ -351,6 +461,15 @@ class Import {
 		}
 
 		$this->wxz_json_index = $index;
+	}
+
+	protected function benchmark_start( $name ) {
+		$this->benchmarks[ $name ] = microtime( true );
+	}
+
+	protected function benchmark_end_print( $name ) {
+		$total_time = microtime( true ) - $this->benchmarks[ $name ];
+		printf( "-----> Benchmark %s took %s seconds - memory: %s\n", $name, $total_time, memory_get_peak_usage() );
 	}
 
 

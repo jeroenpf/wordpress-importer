@@ -11,7 +11,7 @@
   },
   "config": {
     "WP_DEBUG": true,
-    "SAVEQUERIES": true,
+    "SAVEQUERIES": false,
     "ALTERNATE_WP_CRON": true
   }
 }
