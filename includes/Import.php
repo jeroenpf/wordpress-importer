@@ -2,6 +2,9 @@
 
 namespace Importer;
 
+use Importer\Importers\ImporterAbstract;
+use Importer\Importers\Post;
+use Importer\Importers\Term;
 use Opis\JsonSchema\Errors\ErrorFormatter;
 use Opis\JsonSchema\Validator;
 use WP_Error;
@@ -17,7 +20,6 @@ class Import {
 	 */
 	const IMPORT_ORDER = array(
 		'terms',
-		'users',
 		'posts',
 	);
 
@@ -54,8 +56,6 @@ class Import {
 	 * @var int
 	 */
 	protected $processed_counter = 0;
-
-	protected $benchmarks = array();
 
 
 	/**
@@ -186,7 +186,16 @@ class Import {
 	}
 
 	protected function import_object( $type, $data ) {
-		$this->log( 'importing', sprintf( 'Importing %s %d', $type, $data->id ) );
+
+		$class_map = array(
+			'terms' => Term::class,
+			'posts' => Post::class,
+		);
+
+		/** @var ImporterAbstract $importer */
+		$importer = new $class_map[ $type ]( $this );
+
+		$importer->run( $data );
 	}
 
 	/**
