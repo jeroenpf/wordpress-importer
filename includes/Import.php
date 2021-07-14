@@ -57,6 +57,12 @@ class Import {
 
 	protected $benchmarks = array();
 
+
+	/**
+	 * @var array
+	 */
+	protected $last_object;
+
 	/**
 	 * Import constructor.
 	 *
@@ -110,6 +116,10 @@ class Import {
 
 	protected function pre_import() {
 
+		$this->log( 'pre_import', 'Starting the pre-import stage.' );
+		// Reset the object state
+		delete_option( self::OPTION_PREFIX . 'last_object' );
+
 		update_option( self::OPTION_PREFIX . 'stage', 'objects' );
 	}
 
@@ -128,9 +138,10 @@ class Import {
 				update_option( self::OPTION_PREFIX . 'stage', 'finalize' );
 				break;
 			}
+
 			$zip_index = $this->wxz_json_index[ $object['type'] ][ $object['index'] ];
 			$file_path = $this->wxz->getNameIndex( $zip_index );
-			$data      = json_decode( $this->wxz->getFromIndex( $zip_index ) );
+			$data      = json_decode( $this->wxz->getFromIndex( $zip_index ), false );
 
 			if ( ! $this->is_valid_object( $data, $object['type'], $file_path ) ) {
 				continue;
@@ -139,7 +150,8 @@ class Import {
 			// todo import
 			$this->import_object( $object['type'], $data );
 
-			$this->set_import_object_complete( $object['index'] );
+			$this->set_last_object( $object );
+
 			// Update the count of imported items
 			$this->processed_counter++;
 		}
@@ -161,8 +173,6 @@ class Import {
 			return false;
 		}
 
-		$type = self::IMPORT_ORDER[ $type ];
-
 		if ( ! $this->data_is_valid( $data, $type ) ) {
 			$this->log(
 				'schema-violation',
@@ -176,9 +186,7 @@ class Import {
 	}
 
 	protected function import_object( $type, $data ) {
-		$type = self::IMPORT_ORDER[ $type ];
-		usleep(10000);
-		//$this->log( 'importing', printf( 'Importing %s %d', $type, $data->id ) );
+		$this->log( 'importing', sprintf( 'Importing %s %d', $type, $data->id ) );
 	}
 
 	/**
@@ -211,89 +219,38 @@ class Import {
 	 */
 	protected function get_next_object() {
 
-		$option_name = self::OPTION_PREFIX . 'import_state';
+		$current = $this->get_last_object();
+		$current['index']++;
 
-		// We require a lock because only one process should be manipulating the state at a time.
-		$locked = $this->obtain_state_lock();
-
-		if ( $locked instanceof WP_Error ) {
-			return $locked;
+		if ( isset( $this->wxz_json_index[ $current['type'] ][ $current['index'] ] ) ) {
+			return $current;
 		}
 
-		$state = get_option(
-			$option_name,
-			array(
-				'type'      => 0,
-				'index'     => -1,
-				'importing' => array(),
-			)
+		$next_type = $this->get_next_type( $current['type'] );
+
+		if ( ! $next_type ) {
+			return null;
+		}
+
+		return array(
+			'type'  => $next_type,
+			'index' => 0,
 		);
-
-		// Remove importing objects that have timed-out.
-		$state = $this->filter_timeout_objects( $state );
-
-		$has_next_object_for_type    = isset( $this->wxz_json_index[ $state['type'] ][ $state['index'] + 1 ] );
-		$type_has_unfinished_imports = ! empty( $state['importing'] );
-
-		// If there are no more objects to process for the current type but there are still imports running,
-		// we need to wait until all objects have completed before moving on to the next type.
-		if ( ! $has_next_object_for_type && $type_has_unfinished_imports ) {
-			$this->release_state_lock();
-			sleep( 2 );
-			return $this->get_next_object();
-		}
-
-		// If there are no more objects for the current type, proceed to the next type.
-		if ( ! $has_next_object_for_type ) {
-			$state['type']  = $this->get_next_type( $state['type'] );
-			$state['index'] = 0;
-		} else {
-			$state['index']++;
-		}
-
-		// Add the object to the list of importing objects.
-		$state['importing'][] = array( $state['index'], time() );
-
-		// If the type is false, there are no more objects to process.
-		if ( false === $state['type'] ) {
-			$state = null;
-			delete_option( $option_name );
-		} else {
-			update_option( $option_name, $state );
-		}
-
-		$this->release_state_lock();
-
-		return $state;
 	}
 
-	/**
-	 * Filter out objects that are importing but have passed the timeout threshold.
-	 *
-	 * @param $state
-	 *
-	 * @return array
-	 */
-	protected function filter_timeout_objects( $state ) {
+	protected function get_last_object() {
 
-		$max_duration = 30;
+		if ( null === $this->last_object ) {
 
-		$state['importing'] = array_filter(
-			$state['importing'],
-			function( $object ) use ( $max_duration ) {
+			$default = array(
+				'type'  => self::IMPORT_ORDER[0],
+				'index' => -1,
+			);
 
-				$timed_out = time() - $object[1] > $max_duration;
+			$this->last_object = get_option( self::OPTION_PREFIX . 'last_object', $default );
+		}
 
-				if ( $timed_out ) {
-					$this->log( 'object_import_timeout', __( 'Importing object has timed out', 'wordpress-importer' ) );
-				}
-
-				return $timed_out;
-			}
-		);
-
-		return $state;
-
+		return $this->last_object;
 	}
 
 	/**
@@ -301,17 +258,20 @@ class Import {
 	 *
 	 * A type refers to the type of JSON object (e.g. term, post, user, etc.).
 	 *
-	 * @param int $current_type The current type.
+	 * @param string $type The current type.
 	 *
 	 * @return false|int
 	 */
-	protected function get_next_type( $current_type ) {
+	protected function get_next_type( $type ) {
 
-		$next_type = $current_type + 1;
+		$current_type = array_search( $type, self::IMPORT_ORDER, true );
+		$next_type    = $current_type + 1;
 
 		if ( ! array_key_exists( $next_type, self::IMPORT_ORDER ) ) {
 			return false;
 		}
+
+		$next_type = self::IMPORT_ORDER[ $next_type ];
 
 		// If the type has any indexed objects, return them, otherwise proceed to the next type.
 		return empty( $this->wxz_json_index[ $next_type ] )
@@ -319,93 +279,14 @@ class Import {
 			: $next_type;
 	}
 
-	protected function set_import_object_complete( $index ) {
-		$option_name = self::OPTION_PREFIX . 'import_state';
-
-		// We require a lock because only one process should be manipulating the state at a time.
-		$locked = $this->obtain_state_lock();
-
-		if ( $locked instanceof WP_Error ) {
-			return $locked;
-		}
-
-		$state = get_option( $option_name );
-
-		$state['importing'] = array_filter(
-			$state['importing'],
-			static function( $object ) use ( $index ) {
-				return $object[0] !== $index;
-			}
-		);
-
-		$this->release_state_lock();
-	}
-
 	/**
-	 * Obtain a lock for manipulating the state.
+	 * Update the last JSON object that has been processed.
 	 *
-	 * @return bool|WP_Error
+	 * @param $last_object
 	 */
-	protected function obtain_state_lock() {
-
-		$lock_name = self::OPTION_PREFIX . 'state_lock';
-		$tries     = 0;
-		$lock      = false;
-
-		while ( ! $lock && $tries < 10 ) {
-
-			$tries++;
-
-			$this->benchmark_start('insert_lock');
-			$lock = $this->insert_state_lock( $lock_name );
-			$this->benchmark_end_print('insert_lock');
-
-			// Check for an expired lock
-			if ( ! $lock && get_option( $lock_name ) > time() - 5 ) {
-				update_option( $lock_name, time() );
-				$lock = true;
-			}
-
-			usleep( 100 );
-		}
-
-		if ( ! $lock ) {
-			return new \WP_Error( 'no_state_lock', __( 'Can not obtain state lock' ) );
-		}
-
-		return true;
-
-	}
-
-	/**
-	 * Try to insert the state lock option.
-	 *
-	 * @param $lock_name
-	 *
-	 * @return bool|int
-	 */
-	protected function insert_state_lock( $lock_name ) {
-		global $wpdb;
-
-		$lock_insert = $wpdb->prepare(
-			"
-			INSERT IGNORE INTO `$wpdb->options` ( `option_name`, `option_value`, `autoload` )
-			VALUES (%s, %s, 'no') /* LOCK */",
-			$lock_name,
-			time()
-		);
-
-		return $wpdb->query( $lock_insert );
-	}
-
-
-	/**
-	 * Release the lock.
-	 */
-	protected function release_state_lock() {
-		$lock_name = self::OPTION_PREFIX . 'state_lock';
-
-		delete_option( $lock_name );
+	protected function set_last_object( $last_object ) {
+		$this->last_object = $last_object;
+		update_option( self::OPTION_PREFIX . 'last_object', $last_object );
 	}
 
 	/**
@@ -457,20 +338,9 @@ class Import {
 				continue;
 			}
 
-			$index[ array_search( $type, self::IMPORT_ORDER ) ][] = $i;
+			$index[ $type ][] = $i;
 		}
 
 		$this->wxz_json_index = $index;
 	}
-
-	protected function benchmark_start( $name ) {
-		$this->benchmarks[ $name ] = microtime( true );
-	}
-
-	protected function benchmark_end_print( $name ) {
-		$total_time = microtime( true ) - $this->benchmarks[ $name ];
-		printf( "-----> Benchmark %s took %s seconds - memory: %s\n", $name, $total_time, memory_get_peak_usage() );
-	}
-
-
 }
